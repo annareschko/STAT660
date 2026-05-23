@@ -1,0 +1,754 @@
+---
+output: html_document
+---
+
+<style>
+.title-slide {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+.title-slide h1 {
+  font-size: 42px;
+}
+
+.title-slide h2 {
+  font-size: 24px;
+  font-weight: normal;
+}
+
+.title-slide p {
+  font-size: 20px;
+}
+</style>
+
+<div class="title-slide">
+
+# World Happiness Report Analysis (2017–2020)
+
+## Data Visualization for Analytics
+
+### Anna Reschko
+
+Professor: Dr. Shiju Zhang 
+
+STAT 660 
+
+May 2026
+
+</div>
+
+\newpage
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+## Introduction
+
+The World Happiness Report is an annual publication that ranks countries
+by self-reported life satisfaction. This project explores happiness data
+from 2017 to 2020, scraped directly from Wikipedia, to answer 8 research
+questions about global well-being, regional patterns, and the role of
+factors like GDP, social support, and life expectancy.
+
+## Data
+
+Data was scraped from the Wikipedia World Happiness Report page using
+the `rvest` package in R. Four years of data (2017–2020) were extracted,
+cleaned, and combined into a single dataset of 620 country-year observations.
+
+```{r packages}
+
+# Load Libraries
+library(rvest)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(sqldf)
+library(treemap)
+library(maps)
+library(ggrepel)
+library(RColorBrewer)
+library(kableExtra)
+```
+
+
+```{r data}
+
+# Data Collection and Preparation 
+# This section contains the setup and preprocessing code used to build the
+# combined World Happiness dataset for the analysis.
+
+# The code:
+# 1. Pulls World Happiness Report tables from Wikipedia
+# 2. Extracts relevant variables for each year (2017–2020)
+# 3. Standardizes country names across datasets
+# 4. Combines all yearly datasets into one master dataset
+
+
+tabs <- read_html("https://en.wikipedia.org/wiki/World_Happiness_Report") |>
+  html_table(fill = TRUE)
+
+get_year <- function(tab, rank_col, country_col, year) {
+  tab |>
+    select(Rank = all_of(rank_col), Country = all_of(country_col),
+           Score, GDP = `GDP per capita`,
+           Social = `Social support`,
+           Life = `Healthy life expectancy`) |>
+    mutate(across(c(Rank, Score, GDP, Social, Life), as.numeric),
+           Year = year, Country = trimws(Country)) |>
+    filter(!is.na(Score), !is.na(Rank))
+}
+
+fix_names <- function(df) {
+  df |> mutate(Country = recode(Country,
+    "United States of America" = "United States",
+    "Russian Federation"       = "Russia",
+    "Trinidad & Tobago"        = "Trinidad and Tobago",
+    "North Macedonia"          = "Macedonia",
+    "Czech Republic"           = "Czechia"))
+}
+
+h2020 <- fix_names(get_year(tabs[[23]], "Overall rank", "Country or region", 2020))
+h2019 <- fix_names(get_year(tabs[[25]], "Overall rank", "Country or region", 2019))
+h2018 <- fix_names(get_year(tabs[[27]], "Overall rank", "Country or region", 2018))
+h2017 <- fix_names(get_year(tabs[[29]], "Overall Rank", "Country",           2017))
+
+all_years <- bind_rows(h2017, h2018, h2019, h2020)
+
+# Preview datasets
+
+knitr::kable(head(h2017),
+             caption = "Preview of 2017 Happiness Dataset")
+knitr::kable(head(h2018),
+             caption = "Preview of 2018 Happiness Dataset")
+
+knitr::kable(head(h2019),
+             caption = "Preview of 2019 Happiness Dataset")
+
+knitr::kable(head(h2020),
+             caption = "Preview of 2020 Happiness Dataset")
+
+knitr::kable(head(all_years),
+             caption = "Preview of Combined Dataset")
+
+```
+
+## Results
+
+### Question 1 - Top 10 Happiest Countries in 2020
+
+Finland ranks as the happiest country in 2020 with a score of 7.81,
+followed closely by Denmark and Switzerland. All top 10 countries are
+high-income nations, with 7 of the 10 being Nordic or Western European.
+
+```{r q1}
+
+# Question 1: Top 10 happiest countries in 2020 
+
+h2020 |>
+  arrange(desc(Score)) |>
+  slice(1:10) |>
+  ggplot(aes(x = reorder(Country, -Score), y = Score, fill = Score)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  scale_fill_gradient(low = "#c7f0c2", high = "#006400") +
+  geom_text(aes(label = round(Score, 2)), vjust = -0.4, size = 3.2) +
+  labs(title = "Top 10 Happiest Countries (2020)",
+       x = NULL, y = "Happiness Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+```
+
+### Question 2 - Happiness Trends for 6 Major Countries (2017–2020): China, India, USA, Indonesia, Japan, and Russia
+
+The United States shows a slight declining trend across all 4 years.
+China and Russia remain relatively stable. India consistently scores
+the lowest of the 6 countries, while Japan sits in the mid-range
+despite its high GDP.
+
+```{r q2}
+
+# Question 2: Happiness score trends for selected countries (2017–2020) 
+
+all_years |>
+  filter(Country %in% c("China", "India", "United States",
+                         "Indonesia", "Japan", "Russia")) |>
+  ggplot(aes(x = Year, y = Score, color = Country, group = Country)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 2017:2020) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Trends in World Happiness Scores (2017–2020)",
+    subtitle = "Selected countries from the World Happiness Report",
+    x = "Year",
+    y = "Happiness Score",
+    color = "Country"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+### Question 3 - Consistently Top 10 Countries
+
+The same core group of Nordic countries — Finland, Denmark, Norway,
+Iceland, Switzerland, Netherlands, and Sweden — appear in the top 10
+in all 4 years, suggesting stable structural advantages.
+
+```{r q3}
+
+# Question 3: Countries consistently in the top 10 (2017–2020) 
+
+consistent <- all_years |>
+  group_by(Year) |>
+  slice_max(Score, n = 10) |>
+  ungroup() |>
+  count(Country, name = "Years_in_Top10") |>
+  filter(Years_in_Top10 == 4)
+
+knitr::kable(
+  consistent,
+  caption = "Countries Ranked in the Top 10 Across All Four Years"
+)
+
+consistent |>
+  ggplot(aes(x = reorder(Country, Years_in_Top10),
+             y = Years_in_Top10)) +
+  geom_bar(stat = "identity",
+           fill = "darkgreen",
+           width = 0.7) +
+  coord_flip() +
+  scale_y_continuous(breaks = 0:4, limits = c(0,4)) +
+  labs(
+    title = "Countries Ranked in the Top 10 Across All Years (2017–2020)",
+    subtitle = "Based on World Happiness Report scores",
+    x = NULL,
+    y = "Number of Years in Top 10"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Question 4 - GDP vs Happiness Score Correlation
+
+There is a strong positive correlation between GDP per capita and
+happiness score across all 4 years. The relationship is consistent
+year to year, indicating GDP is a reliable but not exclusive predictor
+of national happiness.
+
+```{r q4}
+
+# Question 4: GDP per capita vs Happiness score by Year (sqldf)
+
+sqldf("SELECT Country, Score, GDP, Year
+       FROM all_years
+       WHERE GDP IS NOT NULL AND Score IS NOT NULL") |>
+  ggplot(aes(x = GDP, y = Score, color = factor(Year))) +
+  geom_point(alpha = 0.55, size = 2) +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              aes(group = factor(Year)),
+              linewidth = 1.1) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Relationship Between GDP per Capita and Happiness Scores",
+    subtitle = "World Happiness Report data (2017–2020)",
+    x = "Log GDP per Capita",
+    y = "Happiness Score",
+    color = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+# Correlation Table between GDP and Happiness by Year 
+
+correlation_table <- sqldf("
+    SELECT Country, Score, GDP, Year
+    FROM all_years
+    WHERE GDP IS NOT NULL AND Score IS NOT NULL
+  ") |>
+  group_by(Year) |>
+  summarise(
+    Correlation = round(cor(GDP, Score, use = "complete.obs"), 3)
+  )
+
+knitr::kable(
+  correlation_table,
+  caption = "Correlation Between GDP per Capita and Happiness Score by Year"
+)
+```
+
+
+### Question 5 - Regional Distribution of Happiness (2020)
+
+Europe has the highest median happiness score and least variability.
+Africa has the lowest median with wide spread. The Americas show
+moderate scores with notable outliers.
+
+```{r q5}
+
+# Question 5: Distribution of happiness scores by region 2020 
+
+data("GNI2014", package = "treemap")
+
+h2020 |>
+  left_join(GNI2014 |> select(Country = country, Region = continent),
+            by = "Country") |>
+  mutate(Region = case_when(
+    Country == "United States"                    ~ "North America",
+    Country %in% c("Russia", "Kosovo",
+                   "North Cyprus")                ~ "Europe",
+    Country %in% c("Taiwan", "Hong Kong")         ~ "Asia",
+    is.na(Region)                                 ~ "Other",
+    TRUE                                          ~ Region
+  )) |>
+  filter(Region != "Other") |>
+  ggplot(aes(x = reorder(Region, Score, FUN = median),
+             y = Score, fill = Region)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "tomato") +
+  labs(title = "Happiness Score Distribution by Region (2020)",
+       x = NULL, y = "Happiness Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+```
+
+### Question 6 - Social Support vs Life Expectancy Impact on Happiness (2020)
+
+Countries with both high life expectancy and high social support
+tend to score highest on happiness. High life expectancy alone
+does not guarantee high happiness without strong social support.
+
+```{r q6}
+# Question 6: Bubble plot - social support vs life expectancy 2020 
+
+ggplot(h2020, aes(x = Life, y = Social, size = Score, color = Score)) +
+  geom_point(alpha = 0.7) +
+  scale_size(range = c(2, 14), name = "Happiness Score") +
+  scale_color_gradient(low = "#c7f0c2", high = "#006400", name = "Happiness Score") +
+  labs(title = "Social Support and Life Expectancy in Relation to Happiness",
+    subtitle = "World Happiness Report data (2020)",
+    x = "Healthy Life Expectancy",
+    y = "Social Support") +
+  theme_minimal()
+
+
+```
+
+### Question 7 - Treemap (2020)
+
+```{r q7}
+
+# Question 7: Treemap for 2020 happiness rankings 
+
+h2020 |>
+  arrange(desc(Score)) |>
+  mutate(Rank = row_number()) |>
+
+  treemap(
+    index             = "Country",
+    vSize             = "Score",
+    vColor            = "Rank",
+    type              = "value",
+    palette           = rev(brewer.pal(9, "RdYlGn")),
+
+    title             = "Treemap of World Happiness Rankings (2020)",
+    title.legend      = "Happiness Rank\n(1 = Happiest)",
+
+    fontsize.labels   = 10,
+    fontcolor.labels  = "black",
+    inflate.labels    = FALSE
+  )
+```
+
+### Question 8 - Choropleth Map (2020)
+
+The map clearly shows the geographic happiness divide — Northern
+Europe dominates in green while much of Africa and parts of Asia
+appear in red. Gray areas indicate missing data.
+
+
+```{r q8}
+# Question 8: Choropleth map 2020 
+
+h2020 |>
+  mutate(Country = recode(Country,
+    "United States"        = "USA",
+    "United Kingdom"       = "UK",
+    "Trinidad and Tobago"  = "Trinidad",
+    "North Cyprus"         = "Cyprus",
+    "Congo"                = "Republic of Congo",
+    "DR Congo"             = "Democratic Republic of the Congo"
+  )) |>
+  merge(map_data("world"), by.x = "Country", by.y = "region", all.y = TRUE) |>
+  arrange(group, order) |>
+  ggplot(aes(x = long, y = lat, group = group, fill = Score)) +
+  geom_polygon(color = "white", linewidth = 0.1) +
+  coord_fixed(ratio = 1.25) +
+  scale_fill_gradient(low = "#e41a1c",
+high = "#006400",
+                      na.value = "gray80", name = "Happiness\nScore") +
+  labs(title = "Global Distribution of Happiness Scores (2020)") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+## Conclusion
+
+This analysis confirms that happiness is strongly associated with
+GDP, social support, and life expectancy. Nordic countries consistently
+lead global rankings. Regional disparities are large and persistent,
+with Europe far outpacing Africa across all metrics. The 2017–2020
+period shows relative stability in rankings with modest year-to-year
+changes for most countries.
+
+## Appendix
+
+All code used in this project was written in R and is visible in the
+chunks below. Data was sourced from:
+
+Wikipedia - World Happiness Report:
+https://en.wikipedia.org/wiki/World_Happiness_Report
+
+
+### Code for Project Setup and Data Preparation:
+
+```{r appendix-packages, echo=TRUE, eval=FALSE}
+
+# Load Libraries
+library(rvest)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(sqldf)
+library(treemap)
+library(maps)
+library(ggrepel)
+library(RColorBrewer)
+library(kableExtra)
+```
+
+```{r appendix-data, echo=TRUE, eval=FALSE}
+
+# Data Collection and Preparation 
+# This section contains the setup and preprocessing code used to build the
+# combined World Happiness dataset for the analysis.
+
+# The code:
+# 1. Pulls World Happiness Report tables from Wikipedia
+# 2. Extracts relevant variables for each year (2017–2020)
+# 3. Standardizes country names across datasets
+# 4. Combines all yearly datasets into one master dataset
+
+
+tabs <- read_html("https://en.wikipedia.org/wiki/World_Happiness_Report") |>
+  html_table(fill = TRUE)
+
+get_year <- function(tab, rank_col, country_col, year) {
+  tab |>
+    select(Rank = all_of(rank_col), Country = all_of(country_col),
+           Score, GDP = `GDP per capita`,
+           Social = `Social support`,
+           Life = `Healthy life expectancy`) |>
+    mutate(across(c(Rank, Score, GDP, Social, Life), as.numeric),
+           Year = year, Country = trimws(Country)) |>
+    filter(!is.na(Score), !is.na(Rank))
+}
+
+fix_names <- function(df) {
+  df |> mutate(Country = recode(Country,
+    "United States of America" = "United States",
+    "Russian Federation"       = "Russia",
+    "Trinidad & Tobago"        = "Trinidad and Tobago",
+    "North Macedonia"          = "Macedonia",
+    "Czech Republic"           = "Czechia"))
+}
+
+h2020 <- fix_names(get_year(tabs[[23]], "Overall rank", "Country or region", 2020))
+h2019 <- fix_names(get_year(tabs[[25]], "Overall rank", "Country or region", 2019))
+h2018 <- fix_names(get_year(tabs[[27]], "Overall rank", "Country or region", 2018))
+h2017 <- fix_names(get_year(tabs[[29]], "Overall Rank", "Country",           2017))
+
+all_years <- bind_rows(h2017, h2018, h2019, h2020)
+
+# Preview datasets
+
+knitr::kable(head(h2017),
+             caption = "Preview of 2017 Happiness Dataset")
+knitr::kable(head(h2018),
+             caption = "Preview of 2018 Happiness Dataset")
+
+knitr::kable(head(h2019),
+             caption = "Preview of 2019 Happiness Dataset")
+
+knitr::kable(head(h2020),
+             caption = "Preview of 2020 Happiness Dataset")
+
+knitr::kable(head(all_years),
+             caption = "Preview of Combined Dataset")
+
+
+```
+
+### Code for Question Results:
+
+```{r appendix-q1, echo=TRUE, eval=FALSE}
+
+# Question 1: Top 10 happiest countries in 2020 
+
+h2020 |>
+  arrange(desc(Score)) |>
+  slice(1:10) |>
+  ggplot(aes(x = reorder(Country, -Score), y = Score, fill = Score)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  scale_fill_gradient(low = "#c7f0c2", high = "#006400") +
+  geom_text(aes(label = round(Score, 2)), vjust = -0.4, size = 3.2) +
+  labs(title = "Top 10 Happiest Countries (2020)",
+       x = NULL, y = "Happiness Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+```
+
+```{r appendix-q2, echo=TRUE, eval=FALSE}
+
+# Question 2: Happiness score trends for selected countries (2017–2020) 
+
+all_years |>
+  filter(Country %in% c("China", "India", "United States",
+                         "Indonesia", "Japan", "Russia")) |>
+  ggplot(aes(x = Year, y = Score, color = Country, group = Country)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.5) +
+  scale_x_continuous(breaks = 2017:2020) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Trends in World Happiness Scores (2017–2020)",
+    subtitle = "Selected countries from the World Happiness Report",
+    x = "Year",
+    y = "Happiness Score",
+    color = "Country"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r appendix-q3, echo=TRUE, eval=FALSE}
+
+# Question 3: Countries consistently in the top 10 (2017–2020) 
+
+consistent <- all_years |>
+  group_by(Year) |>
+  slice_max(Score, n = 10) |>
+  ungroup() |>
+  count(Country, name = "Years_in_Top10") |>
+  filter(Years_in_Top10 == 4)
+
+knitr::kable(
+  consistent,
+  caption = "Countries Ranked in the Top 10 Across All Four Years"
+)
+
+consistent |>
+  ggplot(aes(x = reorder(Country, Years_in_Top10),
+             y = Years_in_Top10)) +
+  geom_bar(stat = "identity",
+           fill = "darkgreen",
+           width = 0.7) +
+  coord_flip() +
+  scale_y_continuous(breaks = 0:4, limits = c(0,4)) +
+  labs(
+    title = "Countries Ranked in the Top 10 Across All Years (2017–2020)",
+    subtitle = "Based on World Happiness Report scores",
+    x = NULL,
+    y = "Number of Years in Top 10"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r appendix-q4, echo=TRUE, eval=FALSE}
+
+# Question 4: GDP per capita vs Happiness score by Year (sqldf)
+
+sqldf("SELECT Country, Score, GDP, Year
+       FROM all_years
+       WHERE GDP IS NOT NULL AND Score IS NOT NULL") |>
+  ggplot(aes(x = GDP, y = Score, color = factor(Year))) +
+  geom_point(alpha = 0.55, size = 2) +
+  geom_smooth(method = "lm",
+              se = FALSE,
+              aes(group = factor(Year)),
+              linewidth = 1.1) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "Relationship Between GDP per Capita and Happiness Scores",
+    subtitle = "World Happiness Report data (2017–2020)",
+    x = "Log GDP per Capita",
+    y = "Happiness Score",
+    color = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+# Correlation Table between GDP and Happiness by Year 
+
+correlation_table <- sqldf("
+    SELECT Country, Score, GDP, Year
+    FROM all_years
+    WHERE GDP IS NOT NULL AND Score IS NOT NULL
+  ") |>
+  group_by(Year) |>
+  summarise(
+    Correlation = round(cor(GDP, Score, use = "complete.obs"), 3)
+  )
+
+knitr::kable(
+  correlation_table,
+  caption = "Correlation Between GDP per Capita and Happiness Score by Year"
+)
+```
+
+```{r appendix-q5, echo=TRUE, eval=FALSE}
+
+# Question 5: Distribution of happiness scores by region 2020 
+
+data("GNI2014", package = "treemap")
+
+h2020 |>
+  left_join(GNI2014 |> select(Country = country, Region = continent),
+            by = "Country") |>
+  mutate(Region = case_when(
+    Country == "United States"                    ~ "North America",
+    Country %in% c("Russia", "Kosovo",
+                   "North Cyprus")                ~ "Europe",
+    Country %in% c("Taiwan", "Hong Kong")         ~ "Asia",
+    is.na(Region)                                 ~ "Other",
+    TRUE                                          ~ Region
+  )) |>
+  filter(Region != "Other") |>
+  ggplot(aes(x = reorder(Region, Score, FUN = median),
+             y = Score, fill = Region)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "tomato") +
+  labs(title = "Happiness Score Distribution by Region (2020)",
+       x = NULL, y = "Happiness Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+```
+
+```{r appendix-q6, echo=TRUE, eval=FALSE}
+
+# Question 6: Bubble plot - social support vs life expectancy 2020 
+
+ggplot(h2020, aes(x = Life, y = Social, size = Score, color = Score)) +
+  geom_point(alpha = 0.7) +
+  scale_size(range = c(2, 14), name = "Happiness Score") +
+  scale_color_gradient(low = "#c7f0c2", high = "#006400", name = "Happiness Score") +
+  labs(title = "Social Support and Life Expectancy in Relation to Happiness",
+    subtitle = "World Happiness Report data (2020)",
+    x = "Healthy Life Expectancy",
+    y = "Social Support") +
+  theme_minimal()
+```
+
+```{r appendix-q7, echo=TRUE, eval=FALSE}
+
+# Question 7: Treemap for 2020 happiness rankings 
+
+h2020 |>
+  arrange(desc(Score)) |>
+  mutate(Rank = row_number()) |>
+
+  treemap(
+    index             = "Country",
+    vSize             = "Score",
+    vColor            = "Rank",
+    type              = "value",
+    palette           = rev(brewer.pal(9, "RdYlGn")),
+
+    title             = "Treemap of World Happiness Rankings (2020)",
+    title.legend      = "Happiness Rank\n(1 = Happiest)",
+
+    fontsize.labels   = 10,
+    fontcolor.labels  = "black",
+    inflate.labels    = FALSE
+  )
+```
+
+```{r appendix-q8, echo=TRUE, eval=FALSE}
+
+# Question 8: Choropleth map 2020 
+
+h2020 |>
+  mutate(Country = recode(Country,
+    "United States"        = "USA",
+    "United Kingdom"       = "UK",
+    "Trinidad and Tobago"  = "Trinidad",
+    "North Cyprus"         = "Cyprus",
+    "Congo"                = "Republic of Congo",
+    "DR Congo"             = "Democratic Republic of the Congo"
+  )) |>
+  merge(map_data("world"), by.x = "Country", by.y = "region", all.y = TRUE) |>
+  arrange(group, order) |>
+  ggplot(aes(x = long, y = lat, group = group, fill = Score)) +
+  geom_polygon(color = "white", linewidth = 0.1) +
+  coord_fixed(ratio = 1.25) +
+  scale_fill_gradient(low = "#e41a1c",
+high = "#006400",
+                      na.value = "gray80", name = "Happiness\nScore") +
+  labs(title = "Global Distribution of Happiness Scores (2020)") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+
+
+
+
+
+
+
